@@ -36,6 +36,8 @@ namespace Relianz.TextToSpeech
         #region Main
         static void Main( string[] args )
         {
+            string outputFileName = "";
+
             // Process command line:
             var result = Parser.Default.ParseArguments<Options>( args ).MapResult( (opts) => RunOptions( opts ),            // in case parser success.
                                                                                    (errs) => HandleParseError( errs ) );    // in  case parser fail.
@@ -51,6 +53,8 @@ namespace Relianz.TextToSpeech
             {
                 try
                 {
+                    outputFileName = Path.GetFileName( outputFile );
+
                     synth.SetOutputToWaveFile( outputFile,
                                                new SpeechAudioFormatInfo( 32000,
                                                                           AudioBitsPerSample.Sixteen, AudioChannel.Mono ) );
@@ -75,7 +79,11 @@ namespace Relianz.TextToSpeech
             synth.SpeakSsml( ssmlToSpeak );
 
             // Wait on key to terminate:
-            WaitForKeyThenExit( "Program terminated successfully.", 0 );
+            if( recording && (outputFile.Length != 0) ) {
+                WriteLine( "Generated audio file <{0}>, {1} bytes written.", outputFileName, GetFileSize( outputFile ) );
+            }
+            
+             WaitForKeyThenExit( "Program terminated successfully.", 0 );
 
         } // Main
 
@@ -234,13 +242,33 @@ namespace Relianz.TextToSpeech
                     }
                 }
             }
-            catch( FileNotFoundException ex ) {
+            catch( DirectoryNotFoundException ex ) {
                 WaitForKeyThenExit( ex.Message, -2 );
+            }
+            catch( FileNotFoundException ex ) {
+                WaitForKeyThenExit( ex.Message, -3 );
             }
 
             return ssml.ToString();
 
         } // ReadSsmlFromFile
+
+        static long GetFileSize( string filePath )
+        {
+            // Permissions?
+            if( !Directory.Exists( Path.GetDirectoryName( filePath ) ) )
+            {
+                WriteLine( "Permission to <{0}> denied!", filePath );
+                return -1;
+            }
+            else if( File.Exists( filePath ) )
+            {
+                return new FileInfo( filePath ).Length;
+            }
+
+            return 0;
+
+        } // GetFileSize
         #endregion
 
     } // class TextToSpeech
