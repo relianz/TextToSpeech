@@ -25,6 +25,7 @@ namespace Relianz.TextToSpeech
     using System.IO;                    // FileStream
     using System.Linq;                  // Count
     using System.Text;                  // UTF8Encoding, StringBuilder
+    using System.Globalization;         // CultureInfo
     using System.Speech.Synthesis;      // SpeechSynthesizer
     using System.Speech.AudioFormat;    // SpeechAudioFormatInfo
     using System.Collections.Generic;   // IEnumerable
@@ -42,11 +43,17 @@ namespace Relianz.TextToSpeech
             var result = Parser.Default.ParseArguments<Options>( args ).MapResult( (opts) => RunOptions( opts ),            // in case parser success.
                                                                                    (errs) => HandleParseError( errs ) );    // in  case parser fail.
             if( result != 0 ) {
-                WaitForKeyThenExit( "Invalid or missing command line argument(s)", result );        
+                WaitForKeyThenExit( "Invalid or missing command line argument(s)", ErrorCode.CommandLineError );        
             }
 
             // Create Synthesizer:
             SpeechSynthesizer synth = new SpeechSynthesizer();
+
+            if( displayVoices )
+            {
+                DisplayVoices( synth );
+                WaitForKeyThenExit( "", ErrorCode.Success );
+            }
 
             // Write speech to file? 
             if( recording )
@@ -56,11 +63,11 @@ namespace Relianz.TextToSpeech
                     outputFileName = Path.GetFileName( outputFile );
 
                     synth.SetOutputToWaveFile( outputFile,
-                                               new SpeechAudioFormatInfo( 32000,
+                                               new SpeechAudioFormatInfo( 16000,
                                                                           AudioBitsPerSample.Sixteen, AudioChannel.Mono ) );
                 }
                 catch( DirectoryNotFoundException ex ) {
-                    WaitForKeyThenExit( ex.Message, -1 );
+                    WaitForKeyThenExit( ex.Message, ErrorCode.DirectoryNotFound );
                 }
             }
             else
@@ -68,15 +75,26 @@ namespace Relianz.TextToSpeech
                 synth.SetOutputToDefaultAudioDevice();
             }
 
-            if( displayVoices ) {
-                DisplayVoices( synth );
-            } 
-  
+            if( twoLetterISOLanguageName != null )
+            {
+                if (!SetVoice( synth, VoiceGender.Female, twoLetterISOLanguageName ))
+                {
+                    string msg = "Cannot set language of voice to " + twoLetterISOLanguageName;
+                    WaitForKeyThenExit( msg, ErrorCode.CannotSetLanguage );
+                }
+            }
+
             // Read SSML from input file:
             string ssmlToSpeak = ReadSsmlFromFile( inputFile );
 
-            // Now speak:
-            synth.SpeakSsml( ssmlToSpeak );
+            try
+            {
+                // Now speak:
+                synth.SpeakSsml( ssmlToSpeak );
+            }
+            catch( FormatException ex ) {
+                WaitForKeyThenExit( ex.Message, ErrorCode.SsmlFormatError );
+            }
 
             // Wait on key to terminate:
             if( recording && (outputFile.Length != 0) ) {
@@ -93,17 +111,29 @@ namespace Relianz.TextToSpeech
 
         static string inputFile = null;
         static string outputFile = null;
+        static string twoLetterISOLanguageName = null;
 
-        static void WaitForKeyThenExit( string msg, int exitCode )
+        enum ErrorCode : int
+        {
+            Success = 0,
+            DirectoryNotFound = 1,
+            FileNotFound = 2,
+            CannotSetLanguage = 3,
+            SsmlFormatError = 4,
+            CommandLineError = 5,
+            VersionOrHelpRequired = 6
+        }
+
+        static void WaitForKeyThenExit( string msg, ErrorCode exitCode )
         {
             WriteLine( msg );
-            WriteLine( "Please press ESC to exit ({0})!", exitCode );
+            WriteLine( "Please press ESC to exit ({0})!", exitCode.ToString( "g" ) );
 
             while( !(KeyAvailable && ReadKey( true ).Key == ConsoleKey.Escape) ) {
                 ;
             }
 
-            Environment.Exit( exitCode );
+            Environment.Exit( (int)exitCode );
 
         } // WaitForKeyThenExit
         #endregion
@@ -113,15 +143,22 @@ namespace Relianz.TextToSpeech
         {
             var exitCode = 0;
 
+            if( options.Voices )
+            {
+                displayVoices = true;
+                return exitCode;
+            }
+
             if( options.Verbose )
                 verbose = true;
 
             if( options.InputFile == null )
             {
-                if (verbose)
-                    WriteLine("This version cannot read SSML text from standard input.");
+                if( verbose )
+                    WriteLine( "This version cannot read SSML text from standard input." );
 
-                exitCode |= Options.ErrorMissingInputFile;
+                exitCode = Options.ErrorMissingInputFile;
+                return exitCode;
 
             }
             else
@@ -130,16 +167,20 @@ namespace Relianz.TextToSpeech
            
             } // SSML input.
 
-            if (options.Recording)
+            if( options.Language != null )
+                twoLetterISOLanguageName = options.Language;
+
+            if( options.Recording )
             {
                 recording = true;
 
-                if (options.OutputFile == null)
+                if( options.OutputFile == null )
                 {
-                    if (verbose)
-                        WriteLine("This version cannot write audio data to standard output.");
+                    if( verbose )
+                        WriteLine( "This version cannot write audio data to standard output." );
 
-                    exitCode |= Options.ErrorMissingOutputFile;
+                    exitCode = Options.ErrorMissingOutputFile;
+                    return exitCode;
                 }
                 else
                 {
@@ -148,9 +189,6 @@ namespace Relianz.TextToSpeech
 
             } // recording.
 
-            if (options.Voices)
-                displayVoices = true;
-
             return exitCode;
 
         } // RunOptions
@@ -158,13 +196,14 @@ namespace Relianz.TextToSpeech
         // in case of errors or --help or --version
         static int HandleParseError( IEnumerable<Error> errs )
         {
-            var result = -2;
+            var result = ErrorCode.CommandLineError;
+
             WriteLine( "errors {0}", errs.Count() );
 
             if( errs.Any( x => x is HelpRequestedError || x is VersionRequestedError ) )
-                result = -1;
+                result = ErrorCode.VersionOrHelpRequired;
 
-            return result;
+            return (int)result;
 
         } // HandleParseError.
 
@@ -219,6 +258,39 @@ namespace Relianz.TextToSpeech
             } // foreach InstalledVoice
 
         } // DisplayVoices
+
+        static bool SetVoice( SpeechSynthesizer synthesizer, VoiceGender gender, string language )
+        {
+            bool voiceInstalled = false;
+            CultureInfo culture = null;
+
+            // query installed voices:
+            foreach( var v in synthesizer.GetInstalledVoices().Select( v => v.VoiceInfo ) )
+            {
+                culture = v.Culture;
+
+                // language found?
+                if( culture.TwoLetterISOLanguageName.Equals( language, StringComparison.OrdinalIgnoreCase ) )
+                {
+                    if( v.Gender == gender )
+                    {
+                        voiceInstalled = true;
+                        break;
+                    }
+                }
+                
+            } // for all installed voices.
+
+            if( voiceInstalled )
+            {
+                synthesizer.SelectVoiceByHints( gender, VoiceAge.NotSet, 0, culture );
+                return true;
+            }
+            else
+                return false;
+            
+
+        } // SetVoice
         #endregion
 
         #region Files
@@ -230,12 +302,12 @@ namespace Relianz.TextToSpeech
             UTF8Encoding encoding = new UTF8Encoding( true );
             try
             {
-                using (FileStream fs = File.Open( file, FileMode.Open ))
+                using( FileStream fs = File.Open( file, FileMode.Open ) )
                 {
-                    byte[] b = new byte[1024];
+                    byte[] b = new byte[ 1024 ];
                     int bytesRead;
 
-                    while ((bytesRead = fs.Read( b, 0, b.Length )) > 0)
+                    while( (bytesRead = fs.Read( b, 0, b.Length )) > 0 )
                     {
                         string s = encoding.GetString( b, 0, bytesRead );
                         ssml.Append( s );
@@ -243,10 +315,10 @@ namespace Relianz.TextToSpeech
                 }
             }
             catch( DirectoryNotFoundException ex ) {
-                WaitForKeyThenExit( ex.Message, -2 );
+                WaitForKeyThenExit( ex.Message, ErrorCode.DirectoryNotFound );
             }
             catch( FileNotFoundException ex ) {
-                WaitForKeyThenExit( ex.Message, -3 );
+                WaitForKeyThenExit( ex.Message, ErrorCode.FileNotFound );
             }
 
             return ssml.ToString();

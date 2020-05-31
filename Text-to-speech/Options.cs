@@ -23,14 +23,17 @@ namespace Relianz.TextToSpeech
 
     class Options
     {
+        [Option( 'l', "language", Required = true, HelpText = "Two Letter ISO 639-1 language name." )]
+        public string Language { get; set; }
+
         [Option( 'i', "input", Required = false, HelpText = "Input SSML file to be processed.")]
         public string InputFile { get; set; }
 
+        [Option( 'r', "recording", Required = false, HelpText = "Recording mode, use -o to specify output file." )]
+        public bool Recording { get; set; }
+
         [Option( 'o', "output", Required = false, HelpText = "Output audio file.")]
         public string OutputFile { get; set; }
-
-        [Option( 'r', "recording", Required = false, HelpText = "Recording mode.")]
-        public bool Recording { get; set; }
 
         [Option( 'd', "display_voices", Required = false, HelpText = "Display information on available voices.")]
         public bool Voices { get; set; }
