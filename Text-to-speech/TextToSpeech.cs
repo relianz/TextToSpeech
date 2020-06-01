@@ -77,7 +77,7 @@ namespace Relianz.TextToSpeech
 
             if( twoLetterISOLanguageName != null )
             {
-                if (!SetVoice( synth, VoiceGender.Female, twoLetterISOLanguageName ))
+                if( !SetVoice( synth, VoiceGender.Female, twoLetterISOLanguageName ) )
                 {
                     string msg = "Cannot set language of voice to " + twoLetterISOLanguageName;
                     WaitForKeyThenExit( msg, ErrorCode.CannotSetLanguage );
@@ -263,22 +263,38 @@ namespace Relianz.TextToSpeech
         {
             bool voiceInstalled = false;
             CultureInfo culture = null;
+            string name = null;
 
             // query installed voices:
-            foreach( var v in synthesizer.GetInstalledVoices().Select( v => v.VoiceInfo ) )
+            foreach( var v in synthesizer.GetInstalledVoices() )
             {
-                culture = v.Culture;
+                culture = v.VoiceInfo.Culture;
+                name = v.VoiceInfo.Name;
 
                 // language found?
                 if( culture.TwoLetterISOLanguageName.Equals( language, StringComparison.OrdinalIgnoreCase ) )
                 {
-                    if( v.Gender == gender )
+                    if( v.VoiceInfo.Gender == gender )
                     {
+                        if( verbose )
+                            WriteLine( "Found voice {0}", name );
+
                         voiceInstalled = true;
-                        break;
+                    }
+                    else
+                    {
+                        v.Enabled = false;
+                        if( verbose )
+                            WriteLine( "Disabled voice {0}, due to gender {1}", name, v.VoiceInfo.Gender );
                     }
                 }
-                
+                else
+                {
+                    v.Enabled = false;
+                    if( verbose )
+                        WriteLine( "Disabled voice {0}, due to language {1}", name, culture.TwoLetterISOLanguageName );
+                }
+
             } // for all installed voices.
 
             if( voiceInstalled )
